@@ -6,9 +6,12 @@ const API_BASE_URL = "http://127.0.0.1:8000/api/v1";
 
 export default function LeadsDashboard() {
   const [leads, setLeads] = useState([]);
+  const [historicalLeads, setHistoricalLeads] = useState([]);
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [historicalLoading, setHistoricalLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [historicalError, setHistoricalError] = useState(null);
   const [filter, setFilter] = useState("CALIENTE");
 
   const [empresa, setEmpresa] = useState("");
@@ -33,7 +36,7 @@ export default function LeadsDashboard() {
 
   // Cargar listado de leads
   const fetchLeads = useCallback(async () => {
-    if (filter === "GRAFICOS") return;
+    if (filter === "GRAFICOS" || filter === "HISTORICO") return;
 
     setLoading(true);
     setError(null);
@@ -64,10 +67,42 @@ export default function LeadsDashboard() {
     }
   }, [filter, empresa, asesor]);
 
+  // Cargar exclusivamente el análisis RAG guardado en cierres_definitivos.
+  const fetchHistoricalLeads = useCallback(async () => {
+    setHistoricalLoading(true);
+    setHistoricalError(null);
+    try {
+      const params = new URLSearchParams({ limit: "100" });
+      if (empresa) params.append("empresa_id", empresa);
+      if (asesor) params.append("asesor_id", asesor);
+
+      const response = await fetch(
+        `${API_BASE_URL}/cierres-definitivos?${params.toString()}`
+      );
+      if (!response.ok) {
+        const detail = await response.json().catch(() => null);
+        throw new Error(
+          detail?.detail || "No se pudo obtener el análisis histórico."
+        );
+      }
+
+      setHistoricalLeads(await response.json());
+    } catch (err) {
+      setHistoricalError(
+        err.message || "Error de conexión con el análisis histórico."
+      );
+    } finally {
+      setHistoricalLoading(false);
+    }
+  }, [empresa, asesor]);
+
   useEffect(() => {
     fetchMetrics();
     fetchLeads();
-  }, [fetchMetrics, fetchLeads]);
+    if (filter === "HISTORICO") {
+      fetchHistoricalLeads();
+    }
+  }, [fetchMetrics, fetchLeads, fetchHistoricalLeads, filter]);
 
   const handleStatusChange = async (leadId, newStatus) => {
     try {
@@ -317,7 +352,7 @@ export default function LeadsDashboard() {
             </select>
 
             <div className="flex gap-2 bg-slate-800 p-1 rounded-lg border border-slate-700">
-              {["CALIENTE", "TIBIO", "FRIO", "GRAFICOS"].map((temp) => (
+              {["CALIENTE", "TIBIO", "FRIO", "GRAFICOS", "HISTORICO"].map((temp) => (
                 <button
                   key={temp}
                   onClick={() => setFilter(temp)}
@@ -333,7 +368,11 @@ export default function LeadsDashboard() {
                       : "text-slate-400 hover:text-white"
                   }`}
                 >
-                  {temp === "GRAFICOS" ? "📈 GRÁFICOS" : temp}
+                  {temp === "GRAFICOS"
+                    ? "📈 GRÁFICOS"
+                    : temp === "HISTORICO"
+                      ? "🧠 HISTÓRICO"
+                      : temp}
                 </button>
               ))}
             </div>
@@ -346,6 +385,72 @@ export default function LeadsDashboard() {
             {renderBrandChart()}
             {renderChannelChart()}
           </div>
+        ) : filter === "HISTORICO" ? (
+          historicalLoading ? (
+            <div className="text-center py-10 text-slate-400">
+              Cargando análisis histórico...
+            </div>
+          ) : historicalError ? (
+            <div className="text-center py-10 text-red-400">
+              {historicalError}
+            </div>
+          ) : historicalLeads.length === 0 ? (
+            <div className="text-center py-10 text-slate-400">
+              No hay análisis histórico disponible para los filtros seleccionados.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {historicalLeads.map((lead) => (
+                <div
+                  key={lead.lead_id}
+                  className="bg-slate-800/80 border border-slate-700/60 rounded-xl p-5 shadow-lg space-y-4"
+                >
+                  <div className="flex justify-between items-start gap-3">
+                    <div>
+                      <h2 className="font-bold text-lg text-white">
+                        {lead.nombre || "Sin Nombre"}
+                      </h2>
+                      <p className="text-xs text-slate-400">
+                        {lead.telefono || "Sin teléfono"}
+                      </p>
+                    </div>
+                    <span
+                      className={`px-3 py-1 rounded-full text-xs font-black border ${getBadgeStyle(
+                        lead.temperatura_definitiva
+                      )}`}
+                    >
+                      RAG: {Math.round(lead.score_definitivo || 0)}
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-900/60 rounded-lg p-3 text-xs space-y-1.5 border border-slate-800">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Modelo:</span>
+                      <span className="font-medium text-slate-200">
+                        {lead.modelo_interes || "N/A"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Éxito histórico:</span>
+                      <span className="font-medium text-emerald-400">
+                        {Math.round((lead.tasa_exito_historica || 0) * 100)}%
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Similitud:</span>
+                      <span className="font-medium text-indigo-400">
+                        {Math.round((lead.similitud_historica || 0) * 100)}%
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-slate-300">
+                    {lead.recomendacion || "Sin recomendación"}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )
         ) : (
           <>
             {loading ? (
